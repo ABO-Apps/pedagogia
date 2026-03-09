@@ -10,11 +10,73 @@ export function HeroSection() {
     state: "",
     city: "",
   });
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    console.log("Form submitted:", formData);
-    alert("Obrigado! Em breve você receberá novidades sobre o curso de Pedagogia.");
+    setSubmitError(null);
+
+    const webhookUrl = import.meta.env.VITE_GSHEETS_WEBHOOK_URL?.trim();
+    const token = import.meta.env.VITE_GSHEETS_TOKEN?.trim();
+    const sheetName = import.meta.env.VITE_SHEET_NAME?.trim() || "Leads";
+
+    if (import.meta.env.DEV) {
+      const tokenPreview = token ? `${token.slice(0, 8)}...` : "missing";
+      console.log("[gsheets] submitting", { webhookUrl, tokenPreview, sheetName });
+    }
+
+    if (!webhookUrl || !token) {
+      const missingVars = [
+        !webhookUrl ? "VITE_GSHEETS_WEBHOOK_URL" : null,
+        !token ? "VITE_GSHEETS_TOKEN" : null,
+      ]
+        .filter(Boolean)
+        .join(", ");
+
+      setSubmitError(`Configuracao ausente: ${missingVars}.`);
+      return;
+    }
+
+    if (token.startsWith("$2") && !/^\$2[aby]\$\d{2}\$/.test(token)) {
+      setSubmitError('Token invalido no .env. Escape "$" como "\\$" e reinicie o vite.');
+      return;
+    }
+
+    setIsSubmitting(true);
+
+    try {
+      // Apps Script web app often does not expose CORS headers for frontend reads.
+      // Use no-cors + URLSearchParams for a simple form-style POST.
+      const payload = new URLSearchParams({
+        token,
+        sheet_name: sheetName,
+        submittedAt: new Date().toISOString(),
+        nome: formData.name,
+        email: formData.email,
+        telefone: formData.phone,
+        estado: formData.state,
+        cidade: formData.city,
+      });
+      const payloadString = payload.toString();
+
+      await fetch(`${webhookUrl}?${payloadString}`, {
+        method: "POST",
+        mode: "no-cors",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+        },
+        // Duplicate params in URL to ensure Apps Script e.parameter is populated.
+        body: payloadString,
+      });
+
+      setFormData({ name: "", email: "", phone: "", state: "", city: "" });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Falha ao enviar formulario.";
+      setSubmitError(message);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -136,11 +198,18 @@ export function HeroSection() {
               {/* Submit Button */}
               <button
                 type="submit"
-                className="group w-full px-8 py-5 bg-gradient-to-r from-[#8B3DAE] to-[#E91E63] text-white rounded-2xl font-semibold text-lg hover:shadow-2xl hover:shadow-[#E91E63]/30 transition-all duration-300 flex items-center justify-center gap-2"
+                disabled={isSubmitting}
+                className="group w-full px-8 py-5 bg-gradient-to-r from-[#8B3DAE] to-[#E91E63] text-white rounded-2xl font-semibold text-lg hover:shadow-2xl hover:shadow-[#E91E63]/30 transition-all duration-300 flex items-center justify-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed"
               >
-                Quero transformar o futuro
+                {isSubmitting ? "Enviando..." : "Quero transformar o futuro"}
                 <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
               </button>
+
+              {submitError && (
+                <p className="text-sm text-red-400 text-center">
+                  {submitError}
+                </p>
+              )}
 
               <p className="text-sm text-gray-500 text-center">
                 Ao enviar, você concorda em receber informações sobre o curso de Pedagogia
